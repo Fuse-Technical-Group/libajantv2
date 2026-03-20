@@ -5658,7 +5658,7 @@ static int pci_P2PAperture_map (struct pci_dev *pdev, NTV2PrivateParams * ntv2pp
 //-----------------------------------------------------------------------------
 static void dma_registers_init (struct pci_dev *pdev, NTV2PrivateParams * ntv2pp)
 {
-	// Check whether card can use 64-bit DMA addresses.
+	// Configure DMA engines for the selected method.
 
 	switch(ntv2pp->_dmaMethod)
 	{
@@ -5675,19 +5675,32 @@ static void dma_registers_init (struct pci_dev *pdev, NTV2PrivateParams * ntv2pp
 		break;
 	}
 
+	// Xilinx XDMA designs with a 32-bit BAR 0 cannot generate host
+	// addresses above 4 GB (observed on Corvid 44 12G: C2H transfers
+	// to buffers above 4 GB fail with descriptor errors, status
+	// 0x00000801, and leave the engine wedged until FLR).  Keep the
+	// 32-bit mask set at probe time for those devices.  The aja and
+	// nwl engines use 64-bit descriptors regardless of BAR width, so
+	// only the xlnx method is gated.
+	if ((ntv2pp->_dmaMethod == DmaMethodXlnx) &&
+		!(pci_resource_flags(pdev, 0) & IORESOURCE_MEM_64))
+	{
+		MSG("%s: Using 32-bit DMA mask (xlnx dma with 32-bit BAR 0)\n",
+			ntv2pp->name);
+		return;
+	}
+
 #if defined(DMA_BIT_MASK)
 	if(!dma_set_mask(&pdev->dev, DMA_BIT_MASK(64)))
 #else
 	if(!dma_set_mask(&pdev->dev, DMA_64BIT_MASK))
 #endif
 	{
-		MSG("%s: Using 64-bit DMA mask with 64-bit capable firmware\n",
-			ntv2pp->name);
+		MSG("%s: Using 64-bit DMA mask\n", ntv2pp->name);
 	}
 	else
 	{
-		MSG("%s: Unable to set 64-bit DMA mask\n", ntv2pp->name);
-		MSG("%s: Using 32-bit DMA mask with 64-bit capable firmware\n",
+		MSG("%s: Unable to set 64-bit DMA mask, using 32-bit\n",
 			ntv2pp->name);
 	}
 }
