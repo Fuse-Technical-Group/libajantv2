@@ -5435,7 +5435,7 @@ static int pci_P2PAperture_map (struct pci_dev *pdev, NTV2PrivateParams * ntv2pp
 //-----------------------------------------------------------------------------
 static void dma_registers_init (struct pci_dev *pdev, NTV2PrivateParams * ntv2pp)
 {
-	// Check whether card can use 64-bit DMA addresses.
+	// Configure DMA engines for the selected method.
 
 	switch(ntv2pp->_dmaMethod)
 	{
@@ -5452,19 +5452,31 @@ static void dma_registers_init (struct pci_dev *pdev, NTV2PrivateParams * ntv2pp
 		break;
 	}
 
-#if defined(DMA_BIT_MASK)
-	if(!dma_set_mask(&pdev->dev, DMA_BIT_MASK(64)))
-#else
-	if(!dma_set_mask(&pdev->dev, DMA_64BIT_MASK))
-#endif
+	// Only widen to 64-bit DMA if BAR 0 is a 64-bit resource.
+	// Cards with 32-bit BARs (e.g. Corvid 44 12G) have 32-bit Xilinx
+	// XDMA engines.  Setting a 64-bit mask on these devices lets the
+	// kernel map C2H destination buffers above 4 GB, which the hardware
+	// cannot reach — causing descriptor errors and DMA timeouts.
+	if (pci_resource_flags(pdev, 0) & IORESOURCE_MEM_64)
 	{
-		MSG("%s: Using 64-bit DMA mask with 64-bit capable firmware\n",
-			ntv2pp->name);
+#if defined(DMA_BIT_MASK)
+		if(!dma_set_mask(&pdev->dev, DMA_BIT_MASK(64)))
+#else
+		if(!dma_set_mask(&pdev->dev, DMA_64BIT_MASK))
+#endif
+		{
+			MSG("%s: Using 64-bit DMA mask (64-bit BAR detected)\n",
+				ntv2pp->name);
+		}
+		else
+		{
+			MSG("%s: 64-bit BAR but unable to set 64-bit DMA mask, "
+				"keeping 32-bit\n", ntv2pp->name);
+		}
 	}
 	else
 	{
-		MSG("%s: Unable to set 64-bit DMA mask\n", ntv2pp->name);
-		MSG("%s: Using 32-bit DMA mask with 64-bit capable firmware\n",
+		MSG("%s: Using 32-bit DMA mask (32-bit BARs)\n",
 			ntv2pp->name);
 	}
 }
